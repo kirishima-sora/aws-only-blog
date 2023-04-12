@@ -22,6 +22,8 @@ resource aws_s3_object object {
     bucket = aws_s3_bucket.origin_contents.id
     key = "index.html"
     source = "front/front.html"
+    #content-typeを指定しない場合、ページが表示されずにダウンロードになる場合があるため指定する
+    content_type = "text/html"
 }
 
 #Lambda用IAMロールの信頼関係の定義
@@ -40,35 +42,51 @@ data aws_iam_policy_document assume_role {
 }
 #Lambda用IAMロールの作成
 resource aws_iam_role iam_for_lambda {
-    name               = "Prefecture_Lambda_Role"
+    name               = "cloudfront_access_lambda"
     assume_role_policy = data.aws_iam_policy_document.assume_role.json
-    managed_policy_arns=["arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"]
+    inline_policy {
+        name = "my_inline_policy"
+        policy = jsonencode({
+            Version = "2012-10-17"
+            Statement = [
+                {
+                    Action   = [
+                        "lambda:InvokeFunction",
+                        "lambda:GetFunction",
+                        "lambda:EnableReplication",
+                        "cloudfront:UpdateDistribution"
+                    ]
+                    Effect   = "Allow"
+                    Resource = "*"
+                },
+            ]
+        })
+    }
 }
 data archive_file lambda {
     type        = "zip"
-    source_file = "lambda/lambdaedge-cognito.py"
+    source_file = "lambda/lambda.py"
     output_path = "lambda_handler.zip"
 }
 resource aws_lambda_function lambda {
     filename      = "lambda_handler.zip"
-    function_name = "Cognito_LambdaEdge"
+    function_name = "IPauth"
     role          = aws_iam_role.iam_for_lambda.arn
-    handler       = "lambda_function.lambda_handler"
+    handler       = "lambda.lambda_handler"
     source_code_hash = data.archive_file.lambda.output_base64sha256
     runtime = "python3.8"
 }
 
 #CloudFrontディストリビューション
 resource aws_cloudfront_distribution cf_distribution {
+    enabled = true
+    default_root_object = "index.html"
     #オリジンの設定
     origin {
         domain_name = aws_s3_bucket.origin_contents.bucket_regional_domain_name
         origin_id = aws_s3_bucket.origin_contents.id
         origin_access_control_id = aws_cloudfront_origin_access_control.main.id
     }
-    #オリジンシールド
-    enabled = false
-    #ビューワー証明書
     viewer_certificate {
         cloudfront_default_certificate = true
     }
@@ -114,7 +132,9 @@ data aws_iam_policy_document allow_access_from_cloudfront {
             type        = "Service"
             identifiers = ["cloudfront.amazonaws.com"]
         }
-        actions = ["s3:GetObject"]
+        actions = [
+            "s3:GetObject"
+            ]
         resources = [
             "${aws_s3_bucket.origin_contents.arn}/*"
         ]
@@ -130,28 +150,3 @@ resource aws_s3_bucket_policy allow_access_from_cloudfront {
     bucket = aws_s3_bucket.origin_contents.id
     policy = data.aws_iam_policy_document.allow_access_from_cloudfront.json
 }
-
-#Cognito
-resource aws_cognito_user_pool cognito_pool {
-    name = "cloudfront_access_pool"
-    username_attributes = ["email"]
-    password_policy {
-        minimum_length = 8
-        require_symbols = false
-    }
-    email_configuration {
-        email_sending_account = "COGNITO_DEFAULT"
-    }
-    account_recovery_setting {
-        recovery_mechanism {
-            name     = "verified_email"
-            priority = 1
-        }
-        recovery_mechanism {
-            name     = "verified_phone_number"
-            priority = 2
-        }
-    }
-}
-
-
