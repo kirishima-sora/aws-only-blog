@@ -70,7 +70,7 @@ data archive_file lambda {
 }
 resource aws_lambda_function lambda {
     filename      = "lambda_handler.zip"
-    function_name = "IPauth"
+    function_name = "IPAuth"
     role          = aws_iam_role.iam_for_lambda.arn
     handler       = "lambda.lambda_handler"
     source_code_hash = data.archive_file.lambda.output_base64sha256
@@ -103,6 +103,7 @@ resource aws_cloudfront_distribution cf_distribution {
                 forward = "none"
             }
         }
+        #ビューワーリクエストにLambdaを設定する
         lambda_function_association {
             event_type   = "viewer-request"
             lambda_arn   = aws_lambda_function.lambda.qualified_arn
